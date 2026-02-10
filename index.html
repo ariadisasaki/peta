@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<title>WebGIS Distan Lotim</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@turf/turf@6/turf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+
+<style>
+html,body{margin:0;height:100%;font-family:Segoe UI,sans-serif}
+#map{height:100%}
+.sidebar{
+ position:absolute;top:0;left:0;width:360px;height:100%;
+ background:#fff;z-index:1000;padding:15px;
+ box-shadow:2px 0 12px rgba(0,0,0,.25);overflow:auto
+}
+.menu button{
+ width:100%;padding:10px;margin-bottom:6px;
+ border:none;border-radius:6px;
+ background:#f3f3f3;
+ display:flex;gap:10px;align-items:center;
+ cursor:pointer;transition:.2s
+}
+.menu button:hover{background:#007bff;color:#fff}
+.menu button.active{background:#28a745;color:#fff}
+.card{
+ background:#fafafa;padding:10px;
+ border-radius:6px;margin-top:10px
+}
+.footer{
+ position:absolute;bottom:10px;left:50%;
+ transform:translateX(-50%);
+ background:rgba(255,255,255,.9);
+ padding:6px 14px;border-radius:20px;
+ font-size:13px;z-index:1000
+}
+</style>
+</head>
+
+<body>
+
+<div class="sidebar">
+<h3><i class="fa-solid fa-chart-line"></i> Dashboard WebGIS</h3>
+
+<div class="menu">
+<button id="btn-lp2b" onclick="toggleLayer('lp2b')">
+<i class="fa-solid fa-seedling"></i> LP2B
+</button>
+<button id="btn-rtrw" onclick="toggleLayer('rtrw')">
+<i class="fa-solid fa-map-location-dot"></i> RTRW
+</button>
+<button onclick="analisisKonflik()">
+<i class="fa-solid fa-triangle-exclamation"></i> Validasi Konflik
+</button>
+</div>
+
+<div class="card">
+<b>Statistik Kecamatan</b>
+<canvas id="chartKecamatan"></canvas>
+</div>
+
+<div class="card" id="infoKecamatan">
+Klik kecamatan untuk detail
+</div>
+</div>
+
+<div id="map"></div>
+
+<div class="footer">
+Developed by
+<a href="https://www.facebook.com/share/1C8bjd7Xoh" target="_blank">
+Ariadi Forester
+</a>
+</div>
+
+<script>
+const map=L.map('map').setView([-8.65,116.55],10);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+let layers={},stats={},chart;
+
+/* ===== Load Layers ===== */
+function loadLayer(key,file){
+ fetch(file).then(r=>r.json()).then(d=>{
+  layers[key]=L.geoJSON(d,{
+   style:{color:'#444',weight:1,fillOpacity:.5},
+   onEachFeature:(f,l)=>{
+    let kec=f.properties.Kecamatan;
+    if(!stats[kec]) stats[kec]={lp2b:0,rtrw:0,konflik:0};
+
+    let luas=turf.area(f)/10000;
+    stats[kec][key]+=luas;
+
+    l.on('click',()=>{
+     map.fitBounds(l.getBounds());
+     document.getElementById('infoKecamatan').innerHTML=`
+       <b>${kec}</b><br>
+       LP2B: ${stats[kec].lp2b.toFixed(2)} Ha<br>
+       RTRW: ${stats[kec].rtrw.toFixed(2)} Ha<br>
+       Konflik: ${stats[kec].konflik.toFixed(2)} Ha
+     `;
+     updateChart();
+    });
+   }
+  });
+ });
+}
+
+loadLayer('lp2b','data/lp2b_lombok_timur.json');
+loadLayer('rtrw','data/rtrw_lombok_timur.json');
+
+/* ===== Toggle ===== */
+function toggleLayer(key){
+ let btn=document.getElementById('btn-'+key);
+ let layer=layers[key];
+ if(!map.hasLayer(layer)){
+  layer.addTo(map);
+  map.fitBounds(layer.getBounds());
+  btn.classList.add('active');
+ }else{
+  map.removeLayer(layer);
+  btn.classList.remove('active');
+ }
+}
+
+/* ===== Konflik ===== */
+function analisisKonflik(){
+ layers.lp2b.eachLayer(l=>{
+  layers.rtrw.eachLayer(r=>{
+   let inter=turf.intersect(l.feature,r.feature);
+   if(inter){
+    let kec=l.feature.properties.Kecamatan;
+    let luas=turf.area(inter)/10000;
+    stats[kec].konflik+=luas;
+   }
+  });
+ });
+ updateChart();
+}
+
+/* ===== Chart ===== */
+function updateChart(){
+ let labels=Object.keys(stats);
+ let lp2b=labels.map(k=>stats[k].lp2b);
+ let rtrw=labels.map(k=>stats[k].rtrw);
+
+ if(chart) chart.destroy();
+ chart=new Chart(document.getElementById('chartKecamatan'),{
+  type:'bar',
+  data:{
+   labels,
+   datasets:[
+    {label:'LP2B (Ha)',data:lp2b,backgroundColor:'#28a745'},
+    {label:'RTRW (Ha)',data:rtrw,backgroundColor:'#dc3545'}
+   ]
+  },
+  options:{responsive:true}
+ });
+}
+</script>
+
+</body>
+</html>
