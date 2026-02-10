@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <title>WebGIS Distan Lombok Timur</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- ================= LEAFLET ================= -->
+  <link rel="stylesheet" href="leaflet/leaflet.css">
+
+  <!-- ================= CUSTOM STYLE ================= -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ================= TOP BAR ================= -->
+  <div id="topbar">
+    <h1>🗺️ WebGIS Distan Lombok Timur</h1>
+    <button class="btn-icon" onclick="toggleTheme()" title="Mode Gelap/Terang">🌙</button>
+  </div>
+
+  <!-- ================= CONTROL PANEL ================= -->
+  <div id="panel">
+
+    <h3>📍 Cari Koordinat</h3>
+    <div id="searchBox">
+      <input id="lat" type="number" step="any" placeholder="Latitude">
+      <input id="lng" type="number" step="any" placeholder="Longitude">
+      <button class="btn" onclick="cariKoordinat()">Cari</button>
+      <button class="btn" onclick="hapusMarker()">Hapus</button>
+    </div>
+
+    <hr style="margin:10px 0">
+
+    <h3>📊 Laporan</h3>
+    <button class="btn" onclick="exportPDF()">🧾 Export PDF A3</button>
+
+  </div>
+
+  <!-- ================= MAP ================= -->
+  <div id="map"></div>
+
+  <!-- ================= FOOTER ================= -->
+  <div id="footer">
+    Developed by <b>Ariadi Forester</b> • WebGIS Offline
+  </div>
+
+  <!-- ================= CHART (HIDDEN) ================= -->
+  <canvas id="grafik" width="800" height="300" style="display:none;"></canvas>
+
+  <!-- ================= LIBRARIES ================= -->
+  <script src="leaflet/leaflet.js"></script>
+  <script src="libs/turf.min.js"></script>
+  <script src="libs/chart.min.js"></script>
+  <script src="libs/jspdf.min.js"></script>
+  <script src="libs/jspdf.plugin.autotable.js"></script>
+
+  <!-- ================= MAIN SCRIPT ================= -->
+  <script>
+  /* =====================================================
+     GLOBAL
+  ===================================================== */
+  let map, markerKoordinat;
+  let rankingKecamatan = [];
+
+  /* =====================================================
+     MAP INIT
+  ===================================================== */
+  map = L.map('map').setView([-8.65, 116.53], 10);
+
+  L.tileLayer('tiles/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: 'Basemap Offline'
+  }).addTo(map);
+
+  /* =====================================================
+     STYLES
+  ===================================================== */
+  const styleKecamatan = { color:'#000', weight:1, fillOpacity:0 };
+  const styleLBS  = { color:'#2ecc71', fillOpacity:0.5 };
+  const styleLP2B = { color:'#3498db', fillOpacity:0.5 };
+  const styleLSD  = { color:'#f1c40f', fillOpacity:0.6 };
+  const styleRTRW = { color:'#e74c3c', fillOpacity:0.4 };
+
+  /* =====================================================
+     LAYERS
+  ===================================================== */
+  const batas  = L.geoJSON(null,{style:styleKecamatan}).addTo(map);
+  const lbs    = L.geoJSON(null,{style:styleLBS}).addTo(map);
+  const lp2b   = L.geoJSON(null,{style:styleLP2B}).addTo(map);
+  const lsd    = L.geoJSON(null,{style:styleLSD}).addTo(map);
+  const rtrw   = L.geoJSON(null,{style:styleRTRW}).addTo(map);
+
+  const konflikLSDLayer = L.geoJSON(null,{
+    style:{color:"#ff0000",weight:2,fillOpacity:0.7}
+  }).addTo(map);
+
+  const konflikLP2RtrwLayer = L.geoJSON(null,{
+    style:{color:"#ff6600",weight:2,fillOpacity:0.7}
+  }).addTo(map);
+
+  /* =====================================================
+     FETCH DATA
+  ===================================================== */
+  Promise.all([
+    fetch("data/batas_kecamatan_lombok_timur.json").then(r=>r.json()),
+    fetch("data/lbs_lombok_timur.json").then(r=>r.json()),
+    fetch("data/lp2b_lombok_timur.json").then(r=>r.json()),
+    fetch("data/lsd_lombok_timur.json").then(r=>r.json()),
+    fetch("data/rtrw_lombok_timur.json").then(r=>r.json())
+  ])
+  .then(([batasData,lbsData,lp2bData,lsdData,rtrwData]) => {
+
+    batas.addData(batasData);
+    lbs.addData(lbsData);
+    lp2b.addData(lp2bData);
+    lsd.addData(lsdData);
+    rtrw.addData(rtrwData);
+
+    /* Konflik LSD vs RTRW */
+    lsdData.features.forEach(lsdF=>{
+      rtrwData.features.forEach(rtrwF=>{
+        const k = turf.intersect(lsdF,rtrwF);
+        if(k) konflikLSDLayer.addData(k);
+      });
+    });
+
+    /* Konflik LP2B vs RTRW */
+    lp2bData.features.forEach(lp2bF=>{
+      rtrwData.features.forEach(rtrwF=>{
+        const k = turf.intersect(lp2bF,rtrwF);
+        if(k) konflikLP2RtrwLayer.addData(k);
+      });
+    });
+
+    /* Statistik LSD per Kecamatan */
+    const statistikLSD = {};
+    batasData.features.forEach(kec=>{
+      const nama = kec.properties.nama_kecamatan;
+      statistikLSD[nama] = 0;
+      lsdData.features.forEach(lsdF=>{
+        const irisan = turf.intersect(lsdF,kec);
+        if(irisan) statistikLSD[nama]+=turf.area(irisan)/10000;
+      });
+    });
+
+    rankingKecamatan = Object.entries(statistikLSD)
+      .map(([nama,luas])=>({nama,luas}))
+      .sort((a,b)=>b.luas-a.luas);
+
+    generateChart(rankingKecamatan);
+
+  });
+
+  /* =====================================================
+     LAYER CONTROL
+  ===================================================== */
+  L.control.layers(null,{
+    "Batas Kecamatan": batas,
+    "LBS": lbs,
+    "LP2B": lp2b,
+    "LSD": lsd,
+    "RTRW": rtrw,
+    "Konflik LSD vs RTRW": konflikLSDLayer,
+    "Konflik LP2B vs RTRW": konflikLP2RtrwLayer
+  }).addTo(map);
+
+  /* =====================================================
+     KOORDINAT SEARCH
+  ===================================================== */
+  function cariKoordinat(){
+    const lat = parseFloat(document.getElementById("lat").value);
+    const lng = parseFloat(document.getElementById("lng").value);
+    if(isNaN(lat)||isNaN(lng)) return alert("Koordinat tidak valid");
+
+    if(markerKoordinat) map.removeLayer(markerKoordinat);
+    markerKoordinat = L.marker([lat,lng]).addTo(map)
+      .bindPopup(`Lat: ${lat}<br>Lng: ${lng}`).openPopup();
+    map.setView([lat,lng],16);
+  }
+
+  function hapusMarker(){
+    if(markerKoordinat){
+      map.removeLayer(markerKoordinat);
+      markerKoordinat=null;
+    }
+  }
+
+  /* =====================================================
+     THEME
+  ===================================================== */
+  function toggleTheme(){
+    document.body.classList.toggle("dark");
+    document.querySelector(".btn-icon").innerText =
+      document.body.classList.contains("dark") ? "☀️" : "🌙";
+  }
+
+  /* =====================================================
+     CHART
+  ===================================================== */
+  function generateChart(ranking){
+    const ctx = document.getElementById("grafik").getContext("2d");
+    new Chart(ctx,{
+      type:'bar',
+      data:{
+        labels: ranking.map(r=>r.nama),
+        datasets:[{
+          label:'Luas LSD (ha)',
+          data: ranking.map(r=>r.luas),
+        }]
+      },
+      options:{ responsive:false }
+    });
+  }
+
+  /* =====================================================
+     PDF EXPORT
+  ===================================================== */
+  function exportPDF(){
+    const doc = new jsPDF('landscape','mm','a3');
+    doc.setFontSize(18);
+    doc.text("Laporan Analisis LSD & LP2B Lombok Timur", 148, 40, {align:'center'});
+    doc.addPage();
+
+    doc.autoTable({
+      head:[["No","Kecamatan","Luas LSD (ha)"]],
+      body: rankingKecamatan.map((r,i)=>[i+1,r.nama,r.luas.toFixed(2)])
+    });
+
+    doc.save("Laporan_LSD_LP2B_LombokTimur.pdf");
+  }
+  </script>
+
+</body>
+</html>
